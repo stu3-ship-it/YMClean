@@ -226,3 +226,9 @@ elif choice == "系統管理":
                     st.cache_data.clear()
             except:
                 st.error("設定讀取失敗")
+        with tabs[6]: # 名單更新
+            st.json({
+            "Sheet ID": CONFIG["sheet_id"],
+            "Folder ID": CONFIG["folder_id"],
+            "GCP Project": GCP_INFO["project_id"]
+        })
