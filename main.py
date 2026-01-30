@@ -37,9 +37,9 @@ def get_connection_status():
         status["GCP憑證"] = True
         get_gspread_client().open_by_key(CONFIG["sheet_id"])
         status["Google Sheets"] = True
-        get_drive_service().files().get(fileId=CONFIG["drive_folder_id"],supportsAllDrives=true).execute()
+        get_drive_service().files().get(fileId=CONFIG["drive_folder_id"]).execute()
         status["Google Drive"] = True
-        st.info(fCONFIG["drive_folder_id"])
+        st.info(CONFIG["drive_folder_id"])
     except: pass
     return status
 
