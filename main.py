@@ -229,6 +229,6 @@ elif choice == "系統管理":
         with tabs[6]: # 名單更新
             st.json({
             "Sheet ID": CONFIG["sheet_id"],
-            "Folder ID": CONFIG["folder_id"],
+            "Folder ID": CONFIG["drive_folder_id"],
             "GCP Project": GCP_INFO["project_id"]
         })
