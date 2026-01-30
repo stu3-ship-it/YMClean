@@ -158,7 +158,7 @@ if choice == "衛生糾察":
                             file_ext = file.name.split('.')[-1]
                             new_filename = f"{ins_date}_{selected_class}_{idx:02d}.{file_ext}"
                             
-                            file_metadata = {'name': new_filename, 'parents': [CONFIG["folder_id"]]}
+                            file_metadata = {'name': new_filename, 'parents': [CONFIG["drive_folder_id"]]}
                             media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=f'image/{file_ext}')
                             uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
                             file_id = uploaded_file.get('id')
