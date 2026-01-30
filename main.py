@@ -8,36 +8,35 @@ import random
 import string
 import io
 
-# --- 網頁初始設定 ---
+# --- 1. 初始設定與 Secrets 讀取 ---
 st.set_page_config(page_title="校園環境評分系統", layout="wide")
 
-# --- 讀取 Secrets ---
 GCP_INFO = dict(st.secrets["gcp_service_account"])
 CONFIG = st.secrets["system_config"]
-SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-# --- 初始化 Session State ---
+# 初始化 Session State
 if 'auth_team' not in st.session_state: st.session_state.auth_team = False
 if 'auth_admin' not in st.session_state: st.session_state.auth_admin = False
-if 'score' not in st.session_state: st.session_state.score = 0
+if 'deduction_score' not in st.session_state: st.session_state.deduction_score = 0
 
-# --- 工具函式 ---
-def get_gspread_client():
-    creds = Credentials.from_service_account_info(GCP_INFO, scopes=SCOPE)
-    return gspread.authorize(creds)
+# --- 2. 核心 API 工具 ---
 
-def get_drive_service():
-    creds = Credentials.from_service_account_info(GCP_INFO, scopes=SCOPE)
-    return build('drive', 'v3', credentials=creds)
+def get_creds():
+    return Credentials.from_service_account_info(GCP_INFO, scopes=SCOPE)
 
-def get_connection_status():
+def check_connections():
+    """診斷系統連線狀態"""
     status = {"GCP憑證": False, "Google Sheets": False, "Google Drive": False}
     try:
-        creds = Credentials.from_service_account_info(GCP_INFO, scopes=SCOPE)
+        creds = get_creds()
         status["GCP憑證"] = True
-        get_gspread_client().open_by_key(CONFIG["sheet_id"])
+        # Sheets 測試
+        gspread.authorize(creds).open_by_key(CONFIG["sheet_id"])
         status["Google Sheets"] = True
-        get_drive_service().files().get(fileId=CONFIG["drive_folder_id"]).execute()
+        # Drive 測試 (使用 drive_folder_id)
+        drive_service = build('drive', 'v3', credentials=creds)
+        drive_service.files().get(fileId=CONFIG["drive_folder_id"]).execute()
         status["Google Drive"] = True
     except Exception as e:
         st.sidebar.warning(f"診斷細節: {e}")
@@ -46,35 +45,36 @@ def get_connection_status():
 @st.cache_data(ttl=60)
 def fetch_sheet_data(worksheet_name):
     try:
-        client = get_gspread_client()
+        client = gspread.authorize(get_creds())
         sheet = client.open_by_key(CONFIG["sheet_id"]).worksheet(worksheet_name)
         return sheet.get_all_records()
     except: return []
 
 def calculate_week(target_date):
     try:
-        client = get_gspread_client()
+        client = gspread.authorize(get_creds())
         sheet = client.open_by_key(CONFIG["sheet_id"]).worksheet("settings")
         s_val = sheet.cell(sheet.find("semester_start").row, sheet.find("semester_start").col + 1).value
         start_date = datetime.strptime(s_val, '%Y-%m-%d').date()
-        start_monday = start_date - timedelta(days=start_date.weekday())
-        target_monday = target_date - timedelta(days=target_date.weekday())
-        return (target_monday - start_monday).days // 7 + 1
-    except: return "N/A"
+        start_mon = start_date - timedelta(days=start_date.weekday())
+        target_mon = target_date - timedelta(days=target_date.weekday())
+        return (target_mon - start_mon).days // 7 + 1
+    except: return 1
 
-# --- 側邊欄 ---
+# --- 3. 側邊欄 UI ---
 with st.sidebar:
     st.title("🛡️ 系統選單")
     choice = st.radio("請選擇模式", ["衛生糾察", "班級察看", "系統管理"])
     st.divider()
     st.subheader("🔍 系統連線診斷")
-    diag = get_connection_status()
+    diag = check_connections()
     for k, v in diag.items():
         st.write(f"{'🟢' if v else '🔴'} {k}")
 
-# --- 主頁面 ---
+# --- 4. 主頁面邏輯 ---
 st.title("校園環境評分系統")
 
+# --- 衛生糾察模式 ---
 if choice == "衛生糾察":
     if not st.session_state.auth_team:
         pwd = st.text_input("輸入衛生糾察通行碼", type="password")
@@ -84,151 +84,140 @@ if choice == "衛生糾察":
                 st.rerun()
             else: st.error("❌ 通行碼錯誤")
     else:
-        # 1. 人員選擇
+        # A. 人員與日期
         inspectors = fetch_sheet_data("inspectors")
         grade_map = {"一年級": "1", "二年級": "2", "三年級": "3"}
         sel_grade = st.radio("請選擇年級", list(grade_map.keys()), horizontal=True)
         names = sorted([r['姓名'] for r in inspectors if str(r.get('班級', '')).startswith(grade_map[sel_grade])])
-        
-        selected_name = st.radio("請選擇您的姓名", names, horizontal=True) if names else "無資料"
-        st.info(f"👤 當前評分員：{selected_name}")
+        curr_inspector = st.radio("請選擇您的姓名", names, horizontal=True) if names else "未知"
+        st.info(f"👤 當前評分員：{curr_inspector}")
         st.divider()
 
-        # 2. 日期與週次
-        col1, col2 = st.columns(2)
-        with col1:
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
             ins_date = st.date_input("檢查日期", datetime.now().date())
-        with col2:
-            week_num = calculate_week(ins_date)
-            st.metric("當前週次", f"第 {week_num} 週")
+        with col_d2:
+            week_val = calculate_week(ins_date)
+            st.metric("當前週次", f"第 {week_val} 週")
 
-        # 3. 受檢班級
+        # B. 受檢班級
         st.subheader("📍 選擇受檢班級")
         roster = fetch_sheet_data("roster")
-        t_grade = st.radio("受檢年級", ["一年級", "二年級", "三年級"], horizontal=True, key="tg")
-        t_classes = sorted(list(set([str(r['班級']) for r in roster if str(r.get('班級', '')).startswith(grade_map[t_grade])])))
-        selected_class = st.radio("受檢班級", t_classes, horizontal=True)
+        target_grade = st.radio("受檢年級", ["一年級", "二年級", "三年級"], horizontal=True, key="tg")
+        t_classes = sorted(list(set([str(r['班級']) for r in roster if str(r.get('班級', '')).startswith(grade_map[target_grade])])))
+        target_class = st.radio("受檢班級", t_classes, horizontal=True)
         
-        if selected_class:
-            st.markdown(f"📍 正在評比班級：<span style='color:red; font-weight:bold;'>{selected_class}</span>", unsafe_allow_html=True)
+        if target_class:
+            st.markdown(f"📍 正在評比班級：<span style='color:red; font-weight:bold; font-size:1.2em;'>{target_class}</span>", unsafe_allow_html=True)
         st.divider()
 
-        # 4. 評分細項
-        st.subheader("📝 評分內容")
-        region = st.radio("區域", ["內掃", "外掃", "其他"], horizontal=True)
+        # C. 區域與細項
+        st.markdown("### 🗺️ 區域")
+        area = st.radio("選擇區域", ["內掃", "外掃", "其他"], horizontal=True, label_visibility="collapsed")
         
-        item_options = {
+        item_data = {
             "內掃": ["走廊", "洗手台", "門窗", "廚餘桶", "回收架", "掃具"],
             "外掃": ["地板及草坪", "掃具", "樓梯間", "落葉區", "回收架垃圾桶"],
             "其他": ["其他項目"]
         }
-        selected_item = st.selectbox("項目", item_options[region])
+        selected_item = st.selectbox("選擇細項", item_options := item_data.get(area, ["其他項目"]))
         condition = st.selectbox("狀況", ["髒亂", "有垃圾", "有廚餘", "有蜘蛛網", "沒拖地"])
-        remarks = st.text_input("補充說明")
+        remark = st.text_input("補充說明")
 
-        # 5. 扣分功能 (加減按鈕)
-        st.write("扣分欄位")
+        # D. 扣分功能
+        st.markdown("### 🔢 扣分金額")
         c1, c2, c3 = st.columns([1, 2, 1])
         with c1:
-            if st.button("➖"): st.session_state.score = max(0, st.session_state.score - 1)
+            if st.button("➖"): st.session_state.deduction_score = max(0, st.session_state.deduction_score - 1)
         with c2:
-            st.session_state.score = st.number_input("扣分分值", min_value=0, value=st.session_state.score, step=1, label_visibility="collapsed")
+            score = st.number_input("扣分", min_value=0, value=st.session_state.deduction_score, step=1, label_visibility="collapsed")
+            st.session_state.deduction_score = score
         with c3:
-            if st.button("➕"): st.session_state.score += 1
+            if st.button("➕"): st.session_state.deduction_score += 1
 
-        # 6. 照片上傳
-        uploaded_files = st.file_uploader("違規照片(若有扣分則必填)", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
-        
-        # 7. 送出評分
+        # E. 照片上傳
+        st.markdown("### 📸 違規照片 (若有扣分則必填)")
+        files = st.file_uploader("可選取多個檔案，每個上限 10MB", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+
+        # F. 送出評分
         if st.button("🚀 送出評分"):
-            if st.session_state.score > 0 and not uploaded_files:
-                st.error("⚠️ 有扣分時必須上傳照片")
+            if st.session_state.deduction_score > 0 and not files:
+                st.error("⚠️ 偵測到扣分，請務必上傳違規照片。")
             else:
                 try:
-                    with st.spinner("正在上傳資料與照片..."):
-                        drive_service = get_drive_service()
-                        photo_urls = []
-                        file_names = []
-                        
-                        # 上傳照片
-                        for idx, file in enumerate(uploaded_files):
-                            if file.size > 10 * 1024 * 1024:
-                                st.error(f"檔案 {file.name} 超過 10MB")
-                                continue
-                            
-                            file_ext = file.name.split('.')[-1]
-                            new_filename = f"{ins_date}_{selected_class}_{idx:02d}.{file_ext}"
-                            
-                            file_metadata = {'name': new_filename, 'parents': [CONFIG["drive_folder_id"]]}
-                            media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=f'image/{file_ext}')
-                            uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-                            file_id = uploaded_file.get('id')
-                            
-                            # 設定權限為任何人可讀
-                            drive_service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
-                            
-                            photo_urls.append(f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000")
-                            file_names.append(new_filename)
+                    with st.spinner("正在儲存資料與處理圖片..."):
+                        drive_service = build('drive', 'v3', credentials=get_creds())
+                        photo_links = []
+                        uploaded_names = []
 
-                        # 產生紀錄ID
-                        rand_id = ''.join(random.choices(string.ascii_letters + string.digits, k=5))
-                        record_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{rand_id}"
+                        for idx, f in enumerate(files):
+                            # 檔名：年-月-日_班級_序號
+                            ext = f.name.split('.')[-1]
+                            new_name = f"{ins_date}_{target_class}_{idx:02d}.{ext}"
+                            
+                            media = MediaIoBaseUpload(io.BytesIO(f.read()), mimetype=f'image/{ext}')
+                            f_meta = {'name': new_name, 'parents': [CONFIG["drive_folder_id"]]}
+                            
+                            up_file = drive_service.files().create(body=f_meta, media_body=media, fields='id').execute()
+                            fid = up_file.get('id')
+                            
+                            # 設定共用權限
+                            drive_service.permissions().create(fileId=fid, body={'type': 'anyone', 'role': 'reader'}).execute()
+                            
+                            # 產生縮圖網址
+                            photo_links.append(f"https://drive.google.com/thumbnail?id={fid}&sz=w1000")
+                            uploaded_names.append(new_name)
+
+                        # 產出紀錄 ID 與時間
+                        now = datetime.now()
+                        rand_code = ''.join(random.choices(string.ascii_letters + string.digits, k=5))
+                        record_id = f"{now.strftime('%Y%m%d%H%M%S')}_{rand_code}"
                         
                         # 寫入 Google Sheets
-                        client = get_gspread_client()
+                        client = gspread.authorize(get_creds())
                         main_sheet = client.open_by_key(CONFIG["sheet_id"]).worksheet("main_data")
                         
-                        row_data = [
-                            str(ins_date),                 # 日期
-                            f"第{week_num}週",             # 週次
-                            str(selected_class),           # 班級
-                            str(selected_name),            # 檢查人員
-                            region,                        # 區域
-                            f"{selected_item} {condition}",# 違規細項
-                            remarks,                       # 補充說明
-                            st.session_state.score,        # 扣分 (自加欄位)
-                            ";".join(photo_urls),          # 照片路徑
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'), # 登錄時間
-                            record_id                      # 紀錄ID
-                        ]
-                        main_sheet.append_row(row_data)
+                        main_sheet.append_row([
+                            str(ins_date),          # 日期
+                            str(week_val),          # 週次
+                            str(target_class),      # 班級
+                            str(curr_inspector),    # 檢查人員
+                            area,                   # 區域
+                            f"{selected_item} {condition}", # 違規細項 (串接半形空白)
+                            remark,                 # 補充說明
+                            score,                  # 扣分值
+                            ";".join(photo_links),  # 照片路徑 (分號區隔)
+                            now.strftime('%Y-%m-%d %H:%M:%S'), # 登錄時間
+                            record_id               # 紀錄ID
+                        ])
                         
                         st.success("✅ 資料紀錄完成。")
-                        for fn in file_names: st.write(f"📄 已上傳: {fn}")
-                        st.session_state.score = 0 # 重置分數
-                except Exception as e:
-                    st.error(f"❌ 失敗: {str(e)}")
+                        for n in uploaded_names: st.write(f"📁 已上傳檔案：{n}")
+                        st.session_state.deduction_score = 0 # 重置
+                except Exception as ex:
+                    st.error(f"❌ 失敗：{ex}")
 
-# --- 3. 系統管理頁面 ---
+# --- 系統管理模式 ---
 elif choice == "系統管理":
     if not st.session_state.auth_admin:
-        pwd = st.text_input("請輸入系統管理通行碼", type="password")
-        if st.button("管理員登入"):
+        pwd = st.text_input("輸入管理密碼", type="password")
+        if st.button("管理登入"):
             if pwd == CONFIG["admin_password"]:
                 st.session_state.auth_admin = True
                 st.rerun()
     else:
-        # 管理頁籤
         tabs = st.tabs(["進度監控", "成績總表", "扣分明細", "寄送通知", "申訴審核", "系統設定", "名單更新"])
-        
         with tabs[5]: # 系統設定
-            st.subheader("⚙️ 系統參數設定")
+            st.subheader("⚙️ 開學日期設定")
             try:
-                client = get_gspread_client()
-                sheet = client.open_by_key(CONFIG["sheet_id"]).worksheet("settings")
-                cell = sheet.find("semester_start")
-                current_val = sheet.cell(cell.row, cell.col + 1).value
+                client = gspread.authorize(get_creds())
+                set_sheet = client.open_by_key(CONFIG["sheet_id"]).worksheet("settings")
+                cell = set_sheet.find("semester_start")
+                old_date = datetime.strptime(set_sheet.cell(cell.row, cell.col + 1).value, '%Y-%m-%d').date()
                 
-                new_start = st.date_input("開學日 (semester_start)", datetime.strptime(current_val, '%Y-%m-%d').date())
+                new_date = st.date_input("修改開學日", old_date)
                 if st.button("更新開學日"):
-                    sheet.update_cell(cell.row, cell.col + 1, str(new_start))
-                    st.success("✅ 更新成功")
+                    set_sheet.update_cell(cell.row, cell.col + 1, str(new_date))
+                    st.success("更新成功！")
                     st.cache_data.clear()
-            except:
-                st.error("設定讀取失敗")
-        with tabs[6]: # 名單更新
-            st.json({
-            "Sheet ID": CONFIG["sheet_id"],
-            "Folder ID": CONFIG["drive_folder_id"],
-            "GCP Project": GCP_INFO["project_id"]
-        })
+            except: st.error("設定頁籤讀取異常")
