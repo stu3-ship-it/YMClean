@@ -39,8 +39,8 @@ def get_connection_status():
         status["Google Sheets"] = True
         get_drive_service().files().get(fileId=CONFIG["drive_folder_id"]).execute()
         status["Google Drive"] = True
-        st.info(CONFIG["drive_folder_id"])
-    except: pass
+    except Exception as e:
+        st.sidebar.warning(f"診斷細節: {e}")
     return status
 
 @st.cache_data(ttl=60)
