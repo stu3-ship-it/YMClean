@@ -161,7 +161,7 @@ if choice == "衛生糾察":
                             media = MediaIoBaseUpload(io.BytesIO(f.read()), mimetype=f'image/{ext}')
                             f_meta = {'name': new_name, 'parents': [CONFIG["drive_folder_id"]]}
                             
-                            up_file = drive_service.files().create(body=f_meta, media_body=media, fields='id').execute()
+                            up_file = drive_service.files().create(body=f_meta, media_body=media, fields='id',supportsAllDrives=True).execute()
                             fid = up_file.get('id')
                             
                             # 設定共用權限
