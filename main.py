@@ -14,7 +14,7 @@ st.set_page_config(page_title="校園環境評分系統", layout="wide")
 # --- 讀取 Secrets ---
 GCP_INFO = dict(st.secrets["gcp_service_account"])
 CONFIG = st.secrets["system_config"]
-SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+SCOPE = ["https://spreadsheets.google.com/feeds",, "https://www.googleapis.com/auth/drive"]
 
 # --- 初始化 Session State ---
 if 'auth_team' not in st.session_state: st.session_state.auth_team = False
