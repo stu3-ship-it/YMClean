@@ -163,7 +163,7 @@ if choice == "衛生糾察":
                             fid = up_file.get('id')
                             
                             # 設定共用權限
-                            drive_service.permissions().create(fileId=fid, body={'type': 'anyone', 'role': 'reader'}).execute()
+                            drive_service.permissions().create(fileId=fid, body={'type': 'anyone', 'role': 'reader'},supportsAllDrives=True).execute()
                             
                             # 產生縮圖網址
                             photo_links.append(f"https://drive.google.com/thumbnail?id={fid}&sz=w1000")
