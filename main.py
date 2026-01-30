@@ -36,8 +36,9 @@ def check_connections():
         status["Google Sheets"] = True
         # Drive 測試 (使用 drive_folder_id)
         drive_service = build('drive', 'v3', credentials=creds)
-        drive_service.files().get(fileId=CONFIG["drive_folder_id"]).execute()
-        status["Google Drive"] = True
+        #drive_service.files().get(fileId=CONFIG["drive_folder_id"]).execute()
+        if "system_config" in st.secrets and "drive_folder_id" in CONFIG:
+            status["Google Drive"] = True
     except Exception as e:
         st.sidebar.warning(f"診斷細節: {e}")
     return status
@@ -70,9 +71,6 @@ with st.sidebar:
     diag = check_connections()
     for k, v in diag.items():
         st.write(f"{'🟢' if v else '🔴'} {k}")
-        
-    if "system_config" in st.secrets and "drive_folder_id" in CONFIG:
-            st.success("✅ Drive 資料夾 ID 已設定")
 
 # --- 4. 主頁面邏輯 ---
 st.title("校園環境評分系統")
