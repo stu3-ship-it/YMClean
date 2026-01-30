@@ -28,7 +28,7 @@ def get_gspread_client():
 
 def get_drive_service():
     creds = Credentials.from_service_account_info(GCP_INFO, scopes=SCOPE)
-    return build('drive', 'v3', credentials=creds)
+    return build('drive', 'v3', credentials=creds,cache_discovery=False)
 
 def get_connection_status():
     status = {"GCP憑證": False, "Google Sheets": False, "Google Drive": False}
